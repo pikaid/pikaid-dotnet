@@ -15,7 +15,7 @@ concurrency:
 jobs:
   publish:
     name: Publish Pikaid package
-    # Manual dispatch republishes the existing v1.0.0 tag only if it is not yet on NuGet.
+    # Manual dispatch targets v1.0.0 for initial publication/retry; do not rerun after a successful publish.
     if: >-
       ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) }}
     runs-on: ubuntu-latest
