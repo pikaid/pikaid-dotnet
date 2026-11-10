@@ -3,6 +3,10 @@ name: Publish to NuGet
 on:
   release:
     types: [published]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish.yml
 
 permissions:
   contents: read
@@ -14,7 +18,8 @@ concurrency:
 jobs:
   publish:
     name: Publish Pikaid package
-    if: ${{ !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v') }}
+    # One-time bootstrap uses the exact commit message below. Future pushes do not publish.
+    if: ${{ (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'ci: bootstrap NuGet v1.0.0 trusted publication') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,7 +28,7 @@ jobs:
       - name: Check out release
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || 'v1.0.0' }}
           persist-credentials: false
 
       - name: Set up .NET
@@ -34,7 +39,7 @@ jobs:
       - name: Verify release version
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'v1.0.0' }}
         run: |
           set -euo pipefail
           package_version="$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' src/Pikaid/Pikaid.csproj)"
