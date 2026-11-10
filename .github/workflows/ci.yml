@@ -1,0 +1,484 @@
+name: CI
+
+on:
+  # Every branch: each pushed commit must get a CI result, not only main.
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-test:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Pikaid.sln
+
+      - name: Build
+        run: dotnet build Pikaid.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Pikaid.sln -c Release --no-build
+
+      - name: Run the sample
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet run --project samples/Pikaid.Sample -c Release --no-build
+
+  analyze:
+    name: format and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Set up the previous LTS runtime (.NET 8)
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Assert .ai is untracked and ignored
+        run: |
+          set -euo pipefail
+          tracked="$(git ls-files -- .ai)"
+          if [ -n "$tracked" ]; then
+            echo "::error::.ai/ must never be tracked; found:"
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+          if ! git check-ignore -q .ai/reports/probe.md; then
+            echo "::error::.ai/reports/ is not covered by an ignore rule"
+            exit 1
+          fi
+          archived="$(git archive --format=tar HEAD | tar -tf - | grep -E '(^|/)\.ai(/|$)' || true)"
+          if [ -n "$archived" ]; then
+            echo "::error::.ai/ leaked into the git source archive:"
+            printf '%s\n' "$archived"
+            exit 1
+          fi
+          if [ -z "$(git ls-files -- .github/workflows/ci.yml)" ]; then
+            echo "::error::.github/workflows/ci.yml is not visible to git; the ignore rules hide it"
+            exit 1
+          fi
+          if git check-ignore -q .github/workflows/ci.yml; then
+            echo "::error::.github/workflows/ci.yml is ignored; CI changes could silently disappear"
+            exit 1
+          fi
+          printf 'tracked .ai entries: 0\n'
+          printf 'tracked .github workflow: 1\n'
+          git check-ignore -v .ai/reports/probe.md
+
+      - name: Restore
+        run: dotnet restore Pikaid.sln
+
+      - name: Verify formatting and analyzers
+        run: dotnet format Pikaid.sln --verify-no-changes --no-restore
+
+      - name: Pack
+        run: dotnet pack src/Pikaid/Pikaid.csproj -c Release --no-restore -o artifacts
+
+      - name: Inspect package contents
+        run: |
+          set -euo pipefail
+          nupkg="$(ls artifacts/Pikaid.*.nupkg | head -n 1)"
+          listing="$(unzip -Z1 "$nupkg")"
+          for entry in \
+            "lib/netstandard2.1/Pikaid.dll" \
+            "lib/netstandard2.1/Pikaid.xml" \
+            "lib/net10.0/Pikaid.dll" \
+            "lib/net10.0/Pikaid.xml" \
+            "README.md" \
+            "LICENSE"; do
+            if ! grep -qxF "$entry" <<<"$listing"; then
+              echo "::error::missing from package: $entry"
+              exit 1
+            fi
+          done
+          printf '%s\n' "$listing"
+
+          snupkg="$(ls artifacts/Pikaid.*.snupkg | head -n 1)"
+          symbols="$(unzip -Z1 "$snupkg")"
+          for entry in \
+            "lib/netstandard2.1/Pikaid.pdb" \
+            "lib/net10.0/Pikaid.pdb"; do
+            if ! grep -qxF "$entry" <<<"$symbols"; then
+              echo "::error::missing from symbols package: $entry"
+              exit 1
+            fi
+          done
+          printf '%s\n' "$symbols"
+
+          for archive in "$listing" "$symbols"; do
+            leaked="$(grep -E '(^|/)\.ai(/|$)' <<<"$archive" || true)"
+            if [ -n "$leaked" ]; then
+              echo "::error::local .ai/ artifacts leaked into a package:"
+              printf '%s\n' "$leaked"
+              exit 1
+            fi
+          done
+          printf 'no .ai/ entries in nupkg or snupkg\n'
+
+      - name: Scan for credentials, workspace files and absolute paths
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import io
+          import os
+          import re
+          import subprocess
+          import sys
+          import tarfile
+          import zipfile
+
+          absolute_home = re.compile(
+              r"/Users/[A-Za-z0-9._-]+/"
+              r"|/home/[A-Za-z0-9._-]+/"
+              r"|[A-Za-z]:\\Users\\[^\\]+\\"
+          )
+          patterns = [
+              ("opencode workspace file", re.compile(r"opencode\.jsonc")),
+              ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}")),
+              ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+              ("private key block", re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+              ("NuGet API key assignment", re.compile(r"api[_-]?key\s*[:=]\s*[\"']?[A-Za-z0-9]{20,}", re.I)),
+              ("credential assignment", re.compile(r"(token|secret|password)\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']", re.I)),
+          ]
+
+          failures = []
+
+          def scan(label, text):
+              if "\x00" in text:
+                  return
+              for name, pattern in patterns:
+                  if pattern.search(text):
+                      failures.append(f"{label}: {name}")
+              if absolute_home.search(text):
+                  failures.append(f"{label}: local absolute home path")
+
+          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          for path in files:
+              with open(path, "rb") as handle:
+                  scan(path, handle.read().decode("utf-8", "replace"))
+
+          archive = subprocess.check_output(["git", "archive", "--format=tar", "HEAD"])
+          with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+              for member in tar.getmembers():
+                  if member.isfile():
+                      data = tar.extractfile(member).read().decode("utf-8", "replace")
+                      scan(f"archive:{member.name}", data)
+
+          packages = sorted(glob.glob("artifacts/*.nupkg")) + sorted(glob.glob("artifacts/*.snupkg"))
+          if len(packages) < 2:
+              print("::error::expected both a nupkg and a snupkg to scan; the package leak scan cannot be skipped")
+              sys.exit(1)
+
+          for package in packages:
+              with zipfile.ZipFile(package) as bundle:
+                  for name in bundle.namelist():
+                      payload = bundle.read(name)
+                      # Regression guard for PDB/SourceLink documents: no package
+                      # entry, text or binary, may embed a developer's home path.
+                      for marker in (b"/Users/", b"/home/", b"C:\\Users\\"):
+                          if marker in payload:
+                              failures.append(
+                                  f"package:{os.path.basename(package)}:{name}: local absolute home path"
+                              )
+                      if name.lower().endswith((".dll", ".pdb")):
+                          continue
+                      scan(
+                          f"package:{os.path.basename(package)}:{name}",
+                          payload.decode("utf-8", "replace"),
+                      )
+
+          if failures:
+              for failure in sorted(set(failures)):
+                  print(f"::error::{failure}")
+              sys.exit(1)
+          print(
+              f"scanned {len(files)} tracked files, the git archive and both packages: "
+              "no credentials, workspace files or absolute home paths"
+          )
+          PY
+
+      - name: Verify package consumers
+        run: |
+          set -euo pipefail
+          nupkg="$(ls artifacts/Pikaid.*.nupkg | head -n 1)"
+          version="$(basename "$nupkg" .nupkg)"
+          version="${version#Pikaid.}"
+          echo "package version: $version"
+
+          dotnet restore tests/consumers/net10/Pikaid.ConsumerSmoke.Net10.csproj -p:PikaidVersion="$version"
+          dotnet build tests/consumers/net10/Pikaid.ConsumerSmoke.Net10.csproj -c Release --no-restore -p:PikaidVersion="$version"
+          dotnet tests/consumers/net10/bin/Release/net10.0/Pikaid.ConsumerSmoke.Net10.dll
+
+          # A net8.0 app cannot bind lib/net10.0, so it resolves lib/netstandard2.1 and
+          # runs the shipped down-level asset on the previous LTS runtime. The consumer
+          # asserts the loaded assembly's TargetFrameworkAttribute to prove which asset
+          # NuGet chose.
+          dotnet restore tests/consumers/net8/Pikaid.ConsumerSmoke.Net8.csproj -p:PikaidVersion="$version"
+          dotnet build tests/consumers/net8/Pikaid.ConsumerSmoke.Net8.csproj -c Release --no-restore -p:PikaidVersion="$version"
+          dotnet tests/consumers/net8/bin/Release/net8.0/Pikaid.ConsumerSmoke.Net8.dll
+
+          dotnet restore tests/consumers/netstandard21/Pikaid.ConsumerSmoke.NetStandard21.csproj -p:PikaidVersion="$version"
+          dotnet build tests/consumers/netstandard21/Pikaid.ConsumerSmoke.NetStandard21.csproj -c Release --no-restore -p:PikaidVersion="$version"
+
+          # Execute the shipped netstandard2.1 asset, not just compile against it. It is
+          # unpacked from the nupkg and referenced directly so a net10.0 consumer cannot
+          # silently resolve the net10.0 asset instead.
+          unzip -q -o "$nupkg" 'lib/netstandard2.1/*' -d consumer-assets
+          asset="$PWD/consumer-assets/lib/netstandard2.1/Pikaid.dll"
+          test -f "$asset"
+          dotnet restore tests/consumers/netstandard21.run/Pikaid.ConsumerSmoke.NetStandard21.Run.csproj -p:PikaidNetStandard21Asset="$asset"
+          dotnet build tests/consumers/netstandard21.run/Pikaid.ConsumerSmoke.NetStandard21.Run.csproj -c Release --no-restore -p:PikaidNetStandard21Asset="$asset"
+          dotnet tests/consumers/netstandard21.run/bin/Release/net10.0/Pikaid.ConsumerSmoke.NetStandard21.Run.dll
+
+      - name: Verify external consumer outside the repository
+        run: |
+          set -euo pipefail
+          nupkg="$(ls artifacts/Pikaid.*.nupkg | head -n 1)"
+          version="$(basename "$nupkg" .nupkg)"
+          version="${version#Pikaid.}"
+          artifacts="$PWD/artifacts"
+          external="$(mktemp -d "${RUNNER_TEMP:-/tmp}/pikaid-external.XXXXXX")"
+          cd "$external"
+          cat > NuGet.config <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$artifacts" />
+            </packageSources>
+          </configuration>
+          XML
+          cat > External.csproj <<XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net10.0</TargetFramework>
+              <Nullable>enable</Nullable>
+              <ImplicitUsings>enable</ImplicitUsings>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Pikaid" Version="$version" />
+            </ItemGroup>
+          </Project>
+          XML
+          cat > Program.cs <<'CS'
+          using System;
+          using Pikaid;
+
+          PikaidId generated = PikaidId.New();
+          if (PikaidId.Parse(generated.ToString()) != generated
+              || PikaidId.FromBytes(generated.ToByteArray()) != generated
+              || !PikaidId.IsValid(generated.ToString())
+              || generated.TimestampUtc.Offset != TimeSpan.Zero)
+          {
+              Console.Error.WriteLine("external consumer mismatch");
+              return 1;
+          }
+
+          Console.WriteLine($"external consumer ok: {generated} ({generated.ToByteArray().Length} bytes)");
+          return 0;
+          CS
+          dotnet restore External.csproj
+          dotnet run --project External.csproj -c Release --no-restore
+          cd - >/dev/null
+          rm -rf "$external"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+
+  conformance:
+    name: official PikaID conformance suite
+    runs-on: ubuntu-latest
+    env:
+      PIKAID_SUITE_SHA: 059780cc0e5b113443812720d95c630649bf3aa3
+      PIKAID_SUITE_REPOSITORY: https://github.com/pikaid/pikaid-specs.git
+      PIKAID_SUITE_STATUS: OFFICIAL
+      PIKAID_SUITE_PACKAGE_REVISION: "1.0.0"
+      PIKAID_SUITE_SPEC_REVISION: "1.0.4"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Fetch the pinned official suite
+        run: |
+          set -euo pipefail
+          suite="$RUNNER_TEMP/pikaid-suite"
+          rm -rf "$suite"
+          git init --quiet "$suite"
+          git -C "$suite" remote add origin "$PIKAID_SUITE_REPOSITORY"
+          git -C "$suite" -c core.autocrlf=false fetch --quiet --depth 1 origin "$PIKAID_SUITE_SHA"
+          git -C "$suite" -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          actual="$(git -C "$suite" rev-parse HEAD)"
+          if [ "$actual" != "$PIKAID_SUITE_SHA" ]; then
+            echo "::error::suite checkout is $actual, expected $PIKAID_SUITE_SHA"
+            exit 1
+          fi
+          echo "suite commit: $actual"
+
+      - name: Verify pinned suite integrity
+        working-directory: ${{ runner.temp }}/pikaid-suite/conformance
+        run: |
+          set -euo pipefail
+          sha256sum --check --quiet SHA256SUMS
+          python3 -m pip install --disable-pip-version-check --quiet -r tools/requirements.txt
+          python3 tools/verify_vectors.py \
+            --expect-status "$PIKAID_SUITE_STATUS" \
+            --expect-package-revision "$PIKAID_SUITE_PACKAGE_REVISION" \
+            --expect-spec-revision "$PIKAID_SUITE_SPEC_REVISION"
+
+      - name: Run suite regression tests
+        working-directory: ${{ runner.temp }}/pikaid-suite/conformance
+        run: python3 -m unittest discover -s tools/tests -v
+
+      - name: Run independent Node.js oracle
+        working-directory: ${{ runner.temp }}/pikaid-suite/conformance
+        run: node tools/verify_oracle_node.mjs
+
+      - name: Restore and build
+        run: |
+          set -euo pipefail
+          dotnet restore Pikaid.sln
+          dotnet build Pikaid.sln -c Release --no-restore
+
+      - name: Run native test suite
+        run: dotnet test Pikaid.sln -c Release --no-build
+
+      - name: Publish the JSONL conformance adapter
+        run: >
+          dotnet publish tests/Pikaid.ConformanceAdapter/Pikaid.ConformanceAdapter.csproj
+          -c Release --no-restore -o "$RUNNER_TEMP/adapter"
+
+      - name: Run the official adapter conformance checks
+        id: conformance
+        working-directory: ${{ runner.temp }}/pikaid-suite/conformance
+        run: |
+          set -euo pipefail
+          python3 tools/run_adapter.py --automated-only \
+            --report-json "$RUNNER_TEMP/conformance-report.json" \
+            -- dotnet "$RUNNER_TEMP/adapter/Pikaid.ConformanceAdapter.dll"
+          test -s "$RUNNER_TEMP/conformance-report.json"
+
+      - name: Negative control (deliberately corrupt adapter must fail)
+        working-directory: ${{ runner.temp }}/pikaid-suite/conformance
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/conformance-mutation.log"
+          set +e
+          PIKAID_CONFORMANCE_MUTATION=corrupt-text-to-binary \
+            python3 tools/run_adapter.py --automated-only \
+            -- dotnet "$RUNNER_TEMP/adapter/Pikaid.ConformanceAdapter.dll" >"$log" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "::error::mutated adapter exited $status, expected the runner to report failure (exit 1)"
+            tail -50 "$log"
+            exit 1
+          fi
+          if ! grep -q 'FAIL: valid/' "$log"; then
+            echo "::error::mutated adapter failed without the expected vector failures"
+            tail -50 "$log"
+            exit 1
+          fi
+          echo "negative control: mutated adapter correctly failed with exit 1"
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Pikaid.sln
+
+      - name: Test with coverage
+        run: >
+          dotnet test Pikaid.sln -c Release
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Enforce coverage thresholds
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          paths = glob.glob("TestResults/**/coverage.cobertura.xml", recursive=True)
+          if len(paths) != 1:
+              sys.exit(f"expected exactly one coverage report, found {len(paths)}: {paths}")
+
+          root = ET.parse(paths[0]).getroot()
+          minimums = {"line-rate": 0.99, "branch-rate": 0.98}
+          failed = False
+          for attribute, minimum in minimums.items():
+              actual = float(root.get(attribute))
+              ok = actual >= minimum
+              failed = failed or not ok
+              print(f"{attribute}: {actual:.4f} (minimum {minimum:.4f}) {'ok' if ok else 'FAILED'}")
+
+          if failed:
+              sys.exit(1)
+          PY
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: TestResults/**/coverage.cobertura.xml
+          if-no-files-found: error

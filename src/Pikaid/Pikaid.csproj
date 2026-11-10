@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net10.0</TargetFrameworks>
+    <RootNamespace>Pikaid</RootNamespace>
+    <AssemblyName>Pikaid</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+
+    <!-- NuGet package metadata. The package has NOT been published to NuGet.org. -->
+    <PackageId>Pikaid</PackageId>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <Authors>pikaid</Authors>
+    <Company>pikaid</Company>
+    <Product>pikaid</Product>
+    <Description>Official .NET implementation of pikaid: 26-character, chronologically sortable, lowercase Base36 identifiers with 96 bits of cryptographic randomness and a 17-byte binary representation.</Description>
+    <PackageTags>pikaid;identifier;unique-id;sortable-id;base36;ulid;uuid</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/pikaid/pikaid-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/pikaid/pikaid-dotnet.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+    <!-- SourceLink maps documents to raw.githubusercontent.com. While this repository is
+         private, that URL is a 404 for anonymous consumers, so the compiler also embeds
+         the C# sources in the portable PDBs shipped in the .snupkg. Stepping into the
+         library therefore works without repository access, and automatically prefers
+         the public SourceLink target once the repository is made public. -->
+    <EmbedAllSources>true</EmbedAllSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pikaid.Tests" />
+    <!-- The test-only JSONL conformance bridge needs the existing internal entropy
+         seam to prove that every generation path fails closed. No public API is added. -->
+    <InternalsVisibleTo Include="Pikaid.ConformanceAdapter" />
+  </ItemGroup>
+
+</Project>

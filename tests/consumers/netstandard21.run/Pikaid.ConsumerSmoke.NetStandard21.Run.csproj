@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Pikaid.ConsumerSmoke</RootNamespace>
+    <AssemblyName>Pikaid.ConsumerSmoke.NetStandard21.Run</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The ns2.1 asset is unpacked from the freshly packed nupkg by CI and passed in.
+         A plain Reference (not a PackageReference) is required: a net10.0 consumer would
+         otherwise resolve the net10.0 asset and prove nothing about the ns2.1 one. -->
+    <Reference Include="Pikaid">
+      <HintPath>$(PikaidNetStandard21Asset)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../netstandard21/NetStandard21Smoke.cs" Link="NetStandard21Smoke.cs" />
+  </ItemGroup>
+
+</Project>

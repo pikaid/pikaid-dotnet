@@ -1,0 +1,23 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+TestResults/
+consumer-assets/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS noise
+.DS_Store
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# Local-only agent workspace (never tracked, never packaged)
+/.ai/

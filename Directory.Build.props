@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <!-- Remove the local checkout path from PDBs, SourceLink keys and compiler
+         output so packages never embed a developer's absolute path and builds are
+         reproducible across machines. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <DeterministicSourcePaths>true</DeterministicSourcePaths>
+  </PropertyGroup>
+</Project>
