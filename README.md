@@ -239,12 +239,10 @@ if you need runtime verification for it.
 `Pikaid.1.0.0.snupkg` symbols package. The PDBs carry both SourceLink metadata and the
 full C# sources embedded.
 
-Embedded sources matter here: SourceLink resolves to
-`https://raw.githubusercontent.com/pikaid/pikaid-dotnet/<commit>/*`, which is a `404` for
-anonymous consumers while this repository is private. With sources embedded in the PDB,
-stepping into the library works with no repository access; when the repository becomes
-public, debuggers use the SourceLink target as usual. This is a packaging policy, not a
-change to the repository's visibility.
+SourceLink points to the public source at
+`https://raw.githubusercontent.com/pikaid/pikaid-dotnet/<commit>/*`.
+Sources are also embedded in the portable PDB, so stepping into the library
+works offline or when source downloading is unavailable.
 
 Requires the .NET SDK pinned in [`global.json`](global.json) (10.0.4xx feature band).
 
