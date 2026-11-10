@@ -1,67 +1,58 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/logo.png" alt="pikaid" width="300" />
+  <a href="https://github.com/pikaid/pikaid-specs">
+    <img src="https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/logo.png" alt="pikaid" width="300">
+  </a>
 </p>
 
 <p align="center">
   <strong>Small · Sortable · Secure ID generator</strong>
 </p>
 
-# pikaid — Official .NET Implementation
+<div align="center">
 
-**Status: v1.0.0 — prepared and validated. Not yet published to NuGet.org.**
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![.NET](https://img.shields.io/badge/language-.NET-512BD4.svg)](https://github.com/pikaid/pikaid-dotnet)
+[![CI](https://github.com/pikaid/pikaid-dotnet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pikaid/pikaid-dotnet/actions/workflows/ci.yml)
+[![Official implementation](https://img.shields.io/badge/official-implementation-2e7d32.svg)](https://github.com/pikaid/pikaid-specs)
+[![Specification 1.0.4](https://img.shields.io/badge/spec-1.0.4-4b56a6.svg)](https://github.com/pikaid/pikaid-specs/tree/v1.0.4)
 
-This repository contains the **official .NET implementation** of [pikaid](https://github.com/pikaid), a compact, chronologically sortable, collision-resistant identifier format for databases, APIs, and distributed systems.
+</div>
 
-The pikaid identifier format is immutable and unversioned: **26 lowercase Base36 characters** with a **17-byte binary representation**.
+**pikaid** is the **official .NET implementation** of a compact, chronologically sortable, collision-resistant identifier format for databases, APIs, and distributed systems.
 
-```text
-0s44we8002loz3po6mcf6vsn23   26 characters (text)
-006553f10000112233445566778899aabb   17 bytes (binary)
+This is the immutable, unversioned [pikaid format](https://github.com/pikaid/pikaid-specs/tree/v1.0.4), documented in specification revision **1.0.4**.
+
+## ✨ Why pikaid?
+
+- **Short:** Compact, readable IDs for URLs, logs, and API resources.
+- **Sortable:** Lexicographically ordered by timestamp, with **one-second precision**.
+- **Collision-resistant:** 96 bits of cryptographic randomness make collisions extremely unlikely, never impossible.
+- **Storage-friendly:** Use `BINARY(17)` or readable `CHAR(26)`.
+- **Distributed-friendly:** No central sequence generator or coordination required.
+
+## 🧬 Identifier format
+
+A pikaid contains **26 lowercase Base36 characters**: a **7-character Unix-seconds timestamp** followed by **19 characters encoding 96 bits of cryptographic randomness**. Its binary form is **17 bytes**: 5 unsigned big-endian timestamp bytes followed by 12 randomness bytes.
+
+![Identifier structure](https://raw.githubusercontent.com/pikaid/pikaid-specs/v1.0.4/structure.svg)
+
+> **Ordering:** Different seconds sort chronologically. Within the same second, randomness—not issuance order—decides the order.
+
+> **Security:** These are identifiers, **not secrets**, session credentials, authentication tokens, or API keys.
+
+## ⚙️ Requirements
+
+.NET SDK from global.json for building; supported target frameworks are documented below.
+
+## 📦 Installation
+
+The package has not yet been published to NuGet. Clone this repository, then build and run its included sample:
+
+```sh
+git clone https://github.com/pikaid/pikaid-dotnet.git
+cd pikaid-dotnet
+dotnet run --project samples/Pikaid.Sample -c Release
 ```
-
-## Canonical specification
-
-The authoritative definition is [pikaid specification revision 1.0.4](https://github.com/pikaid/pikaid-specs/tree/v1.0.4).
-
-This library implements that revision and is validated against the
-[official conformance vectors](https://github.com/pikaid/pikaid-php/blob/e3f843edeb5157a5d2d25196cac0d69580810a95/tests/vectors/pikaid-v1.json)
-published with the official PHP implementation (`pikaid-php` `v1.2.0`). The copy in
-this repository is byte-for-byte identical to that pinned revision.
-The format is unversioned, so there is no negotiation, version prefix, or migration
-story: a pikaid produced by any conforming implementation is a valid pikaid here.
-
-## Official cross-language conformance suite
-
-This library is also validated against the official cross-language conformance suite in
-[`pikaid/pikaid-specs`](https://github.com/pikaid/pikaid-specs) (package revision `1.0.0`,
-status `OFFICIAL`, spec revision `1.0.4`), pinned at the immutable commit
-[`059780cc`](https://github.com/pikaid/pikaid-specs/tree/059780cc0e5b113443812720d95c630649bf3aa3/conformance).
-The suite ships `SHA256SUMS`, JSON Schemas, a fixture integrity verifier, its own
-self-tests and an independent Node.js `BigInt` oracle. CI fetches that exact commit,
-verifies all 31 checksummed files and the manifest, and runs every applicable row through
-a small **test-only** JSON-Lines adapter (`tests/Pikaid.ConformanceAdapter`) that calls
-the real public API. The adapter is never packed and is not referenced by the library.
-
-```bash
-# Inside a checkout of the pinned suite commit, under conformance/:
-python tools/verify_vectors.py --expect-status OFFICIAL \
-  --expect-package-revision 1.0.0 --expect-spec-revision 1.0.4
-python -m unittest discover -s tools/tests -v
-node tools/verify_oracle_node.mjs
-
-# Runs all automated cases and exits 0.
-python tools/run_adapter.py --automated-only -- \
-  dotnet path/to/Pikaid.ConformanceAdapter.dll
-```
-
-`--automated-only` exit `0` means the automated checks passed. It is **not** a
-conformance certification: the suite defines two manual CSPRNG review obligations,
-`P-GENERATE-RNG-SOURCE` and `P-GENERATE-RNG-FAILURE`, that require independent human
-review. Running the runner without `--automated-only` therefore exits `3` with
-`AUTOMATED_PASS_AUDIT_REQUIRED` while those audits are outstanding. This repository does
-not claim that certification.
-
-## Installation
 
 > The package is **not yet published to NuGet.org**. `1.0.0` is the prepared release
 > version; the metadata below is what the package already contains.
@@ -78,7 +69,9 @@ Until then, reference the project or assembly directly:
 
 The library has no runtime dependencies beyond the base class library.
 
-## Quick start
+## 🚀 Basic Usage
+
+The following example works in a .NET console application's `Program.cs` after adding the local `Pikaid.csproj` project reference shown above:
 
 ```csharp
 using Pikaid;
@@ -101,20 +94,18 @@ PikaidId fromText = PikaidId.Parse(id.ToString());
 PikaidId fromBinary = PikaidId.FromBytes(bytes);
 ```
 
-## Format
+## 💡 Example Use Case
 
-| Part      | Text                                | Binary                          |
-| --------- | ----------------------------------- | ------------------------------- |
-| Timestamp | 7 lowercase Base36 digits (`0..zzzzzzz`) | 5 bytes, unsigned big-endian    |
-| Randomness | 19 lowercase Base36 digits          | 12 bytes, unchanged             |
-| Total     | 26 characters                       | 17 bytes                        |
+Use pikaid to identify **users, orders, invoices, uploads, events, and API resources**. Independent services can generate compact IDs without a shared counter, while timestamp-based ordering helps with indexing, sorting, and logs.
 
-The timestamp is a Unix timestamp in whole seconds, in the range
-`0 .. 78,364,164,095` (`0 .. 0x12_3E_DE_3F_FF`), which is `36^7 - 1`. The randomness
-field is exactly 96 bits (`2^96` values). Nineteen Base36 digits can encode more than
-96 bits, so values above `2^96 - 1` are well-formed but not valid, and are rejected.
+## 📚 Canonical specification
 
-## API
+- [Canonical specification](https://github.com/pikaid/pikaid-specs)
+- [Revision 1.0.4](https://github.com/pikaid/pikaid-specs/tree/v1.0.4)
+
+Specification revisions describe the format; they do not change the encoded identifiers.
+
+## 🧩 API Reference
 
 `PikaidId` is an immutable `readonly struct` implementing `IEquatable<PikaidId>`,
 `IComparable<PikaidId>`, and `IComparable`. Its `default` value is the valid all-zero
@@ -195,7 +186,7 @@ representation. `GetHashCode` is consistent with equality.
 Generation fails closed: if the clock or the CSPRNG is unusable, no ID is produced with
 weakened randomness or a truncated timestamp.
 
-## Ordering caveats
+## 🔄 Order Guarantee
 
 - Values with **different timestamps** sort chronologically by construction.
 - Values generated **within the same second** sort by randomness, **not** by generation
@@ -207,19 +198,23 @@ weakened randomness or a truncated timestamp.
   binary columns use `BINARY(17)` or an equivalent fixed-width binary type compared
   bytewise. Database schema and index choices remain the caller's responsibility.
 
-## Security notes
+## 🛢 Storage Recommendations
 
-- A pikaid is an **identifier, not a capability**. It is not a secret, password, session
-  token, API key, or authorization mechanism.
-- The 96 random bits give `2^96 ≈ 7.92 × 10^28` possible suffixes per timestamp second.
-  Uniqueness is probabilistic, not guaranteed; see the specification for the collision
-  formula.
-- Randomness comes from `RandomNumberGenerator`, i.e. the operating system CSPRNG. This
-  library does not use `Random`, `Guid.NewGuid()`, or a time-seeded generator.
-- Timestamps are embedded in clear text and reveal creation time to one-second
-  precision. Do not treat a pikaid as an opaque or unlinkable value.
+| Representation | Size | Recommended for |
+| --- | ---: | --- |
+| **BINARY(17)** | 17 bytes | Compact primary keys and indexes |
+| **CHAR(26)** | 26 characters | Readable SQL, debugging, URLs, and logs |
 
-## Target frameworks
+Use an **ASCII bytewise/binary collation** for text columns (for example, `ascii_bin` on MariaDB/MySQL). Case-insensitive or locale-aware sorting is not a substitute for canonical bytewise comparison.
+
+## ✅ Verification and release status
+
+The [CI workflow](https://github.com/pikaid/pikaid-dotnet/actions/workflows/ci.yml) runs native tests, pinned automated conformance checks, and language-specific quality gates. To run the native checks locally from a checkout: `dotnet test Pikaid.sln -c Release`.
+
+**Automated passing tests are not a security certification.** The independent CSPRNG source and failure-path audits (`P-GENERATE-RNG-SOURCE` and `P-GENERATE-RNG-FAILURE`) still require separate human evidence.
+
+<details>
+<summary>Platform, tooling, and conformance details</summary>
 
 | TFM | Why |
 | --- | --- |
@@ -240,8 +235,6 @@ that the loaded assembly's `TargetFrameworkAttribute` is
 compile. No wider down-level runtime matrix is claimed here; run your own target runtime
 if you need runtime verification for it.
 
-## Debugging, symbols and source
-
 `Pikaid.dll` is deterministic and ships with a portable PDB in the companion
 `Pikaid.1.0.0.snupkg` symbols package. The PDBs carry both SourceLink metadata and the
 full C# sources embedded.
@@ -252,15 +245,6 @@ anonymous consumers while this repository is private. With sources embedded in t
 stepping into the library works with no repository access; when the repository becomes
 public, debuggers use the SourceLink target as usual. This is a packaging policy, not a
 change to the repository's visibility.
-
-## Versioning
-
-The package follows [Semantic Versioning](https://semver.org/). `1.0.0` is the first
-stable release and matches specification revision 1.0.4. The identifier format itself is
-immutable and unversioned, so library releases never change the bytes of a pikaid. See
-[`CHANGELOG.md`](CHANGELOG.md) for the release history.
-
-## Building and testing
 
 Requires the .NET SDK pinned in [`global.json`](global.json) (10.0.4xx feature band).
 
@@ -297,6 +281,64 @@ against. A separate
 manifest and schemas, runs its self-tests and Node.js oracle, then executes the adapter
 and a deliberately corrupted negative control that must fail.
 
-## License
+This library is also validated against the official cross-language conformance suite in
+[`pikaid/pikaid-specs`](https://github.com/pikaid/pikaid-specs) (package revision `1.0.0`,
+status `OFFICIAL`, spec revision `1.0.4`), pinned at the immutable commit
+[`059780cc`](https://github.com/pikaid/pikaid-specs/tree/059780cc0e5b113443812720d95c630649bf3aa3/conformance).
+The suite ships `SHA256SUMS`, JSON Schemas, a fixture integrity verifier, its own
+self-tests and an independent Node.js `BigInt` oracle. CI fetches that exact commit,
+verifies all 31 checksummed files and the manifest, and runs every applicable row through
+a small **test-only** JSON-Lines adapter (`tests/Pikaid.ConformanceAdapter`) that calls
+the real public API. The adapter is never packed and is not referenced by the library.
 
-[MIT](LICENSE).
+```bash
+# Inside a checkout of the pinned suite commit, under conformance/:
+python tools/verify_vectors.py --expect-status OFFICIAL \
+  --expect-package-revision 1.0.0 --expect-spec-revision 1.0.4
+python -m unittest discover -s tools/tests -v
+node tools/verify_oracle_node.mjs
+
+# Runs all automated cases and exits 0.
+python tools/run_adapter.py --automated-only -- \
+  dotnet path/to/Pikaid.ConformanceAdapter.dll
+```
+
+`--automated-only` exit `0` means the automated checks passed. It is **not** a
+conformance certification: the suite defines two manual CSPRNG review obligations,
+`P-GENERATE-RNG-SOURCE` and `P-GENERATE-RNG-FAILURE`, that require independent human
+review. Running the runner without `--automated-only` therefore exits `3` with
+`AUTOMATED_PASS_AUDIT_REQUIRED` while those audits are outstanding. This repository does
+not claim that certification.
+
+</details>
+
+Registry publication is not implied by a green CI: use the installation method documented above.
+
+## 🤝 Contributing
+
+Contributions are always welcome! 💙
+
+Whether you're fixing a typo, improving documentation, adding tests, or making pikaid even better, every contribution is appreciated.
+
+**Want to help? Here's how:**
+
+- 🐛 **Found a bug?** [Open an issue](https://github.com/pikaid/pikaid-dotnet/issues) with clear reproduction steps.
+- 💡 **Have an idea?** Start with an issue before making major changes.
+- 🛠️ **Ready to contribute?** Open a pull request explaining your changes.
+- 🧪 **Keep it tested.** Add meaningful regression tests for behavior changes and follow the existing conventions.
+- ✅ **Make sure CI passes.** All required checks must be green before a pull request is merged. No shortcuts!
+
+**One important rule:** pikaid's identifier format is immutable. Contributions must preserve the [canonical specification (revision 1.0.4)](https://github.com/pikaid/pikaid-specs/tree/v1.0.4).
+
+🔐 **Found a security vulnerability?** Report it privately using GitHub's security reporting (when available), or [contact the maintainer](mailto:larananas.dev@proton.me)—not through a public issue.
+
+**Every improvement matters, big or small. Thanks for helping make pikaid better!** 🐇
+
+## 📄 License
+
+The implementation is available under the [MIT License](LICENSE).
+
+## ✉️ Contact
+
+For licensing or project-related questions: [larananas.dev@proton.me](mailto:larananas.dev@proton.me).
+
