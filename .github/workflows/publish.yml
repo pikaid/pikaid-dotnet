@@ -3,10 +3,7 @@ name: Publish to NuGet
 on:
   release:
     types: [published]
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/publish.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,9 +15,9 @@ concurrency:
 jobs:
   publish:
     name: Publish Pikaid package
-    # One-time bootstrap uses the exact commit message below. Future pushes do not publish.
+    # Manual dispatch republishes the existing v1.0.0 tag only if it is not yet on NuGet.
     if: >-
-      ${{ (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'ci: bootstrap NuGet v1.0.0 trusted publication') }}
+      ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
