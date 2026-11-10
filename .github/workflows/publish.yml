@@ -1,0 +1,96 @@
+name: Publish to NuGet
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuget-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Pikaid package
+    if: ${{ !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Verify release version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          package_version="$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' src/Pikaid/Pikaid.csproj)"
+          if [[ -z "$package_version" || "$RELEASE_TAG" != "v$package_version" ]]; then
+            echo "::error::Release tag $RELEASE_TAG must match project version v$package_version"
+            exit 1
+          fi
+
+      - name: Restore
+        run: dotnet restore Pikaid.sln
+
+      - name: Build
+        run: dotnet build Pikaid.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Pikaid.sln -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack src/Pikaid/Pikaid.csproj -c Release --no-build -o artifacts
+
+      - name: Verify package
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(artifacts/Pikaid.*.nupkg)
+          symbols=(artifacts/Pikaid.*.snupkg)
+          if (( ${#packages[@]} != 1 || ${#symbols[@]} != 1 )); then
+            echo "::error::Expected exactly one Pikaid .nupkg and one .snupkg"
+            exit 1
+          fi
+
+      - name: Verify NuGet account configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [[ -z "$NUGET_USER" ]]; then
+            echo "::error::Configure repository variable NUGET_USER with your nuget.org username (not email)."
+            exit 1
+          fi
+
+      - name: Request short-lived NuGet API key
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish package
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push 'artifacts/*.nupkg' \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json
+          dotnet nuget push 'artifacts/*.snupkg' \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json
